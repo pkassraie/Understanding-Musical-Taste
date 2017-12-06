@@ -1,0 +1,82 @@
+---
+title: "WebAPI"
+author: "P. kassraie"
+date: "December 5, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+```
+
+# 0. Intro
+
+In this project I want to gather all the data regarding the songs I've been listening to in the last 5 years, from the musical cords to the artist's origins and last.fm tags and etc. My goal is to gain some understanding over my taste in music and train a model which can tell if I'm going to like a new song or not.
+Using this model, I plan to automatically generate playlists for myself, then sit back and dive into the music!
+
+I've been using last.fm since december 2012. Last.fm is an amazing website, which keeps track of almost all of the tracks it's users listen to. I have had it installed on my phone and my computer, so a large portion of everything I've listened is logged, a total of 38173 song, 7920 of which are distinct.
+# 1. Gathering and Organizing a Large and Clean Dataset
+
+
+## Setting Up Spotify Web API 
+```{r}
+#devtools::install_github('charlie86/spotifyr')
+library(spotifyr)
+Sys.setenv(SPOTIFY_CLIENT_ID = '67cd991e4f1e4571bdb4391f72afee61' )
+Sys.setenv(SPOTIFY_CLIENT_SECRET = '1c7ca3366738498686924f7203cf8b62')
+
+```
+
+## Creating Music Listening History Dataset
+
+Last.fm allows to gather the music listening history data.
+I have previously collected this data using python and [lastfm_downloader.ipynb](https://github.com/gboeing/data-visualization/blob/master/lastfm-listening-history/lastfm_downloader.ipynb)
+Here, I'll just load them  into dataframes.
+
+Also, MusicBrainz API gives a set of features for the origins of (Almost any) artist.
+The features for each artist are also previously collected, using [musicbrainz_downloader.ipynb](https://github.com/gboeing/data-visualization/blob/master/lastfm-listening-history/musicbrainz_downloader.ipynb)
+
+```{r}
+ListenHistory = read.csv('scrob.csv')
+ArtistInfo = read.csv('MuBr.csv')
+#head(ListenHistory)
+#head(ArtistInfo)
+ListenHistory %>% group_by(artist, album, track) %>% summarize(hits = n()) ->Logs
+ArtistInfo %>% select(id, artist = name, type, gender, country, begin_date, end_date, area_name, place, place_full)->ArtistInfo
+Logs = left_join(Logs,ArtistInfo,by='artist')
+Logs <- data.frame(lapply(Logs, as.character), stringsAsFactors=FALSE)
+```
+
+The mean value of the time a song is listened to during the day could have been a valuable indicator for others, but not me!
+Spotify Web API has a function called get audio features. Now I'm gonna use that to crawl the audio features for all the songs from all the artists I have listenend to in the past 5 years. Exciting!
+
+
+
+```{r}
+#SpotifyArtistFeatures = data.frame()
+#artists = distinct(Logs["artist"])
+getaudiofeat <- function(artistname) {
+    out <- tryCatch(
+        {
+        get_artist_audio_features(a)
+        },
+        error=function(cond) {
+            return(data.frame())
+        },
+        warning=function(cond ) {
+            return(data.frame())
+        })    
+    return(out)}
+
+for (a in artists[1143:1982,1]){
+  SpotifyArtistFeatures = bind_rows(SpotifyArtistFeatures, getaudiofeat(a))
+}
+
+```
+
