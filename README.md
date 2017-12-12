@@ -8,7 +8,7 @@ The project contains a couple of modules described below:
 
 ## Gaining Insight via Visualization
 
-![Alt text](/master/Rplot.jpeg?raw=true "My Interest in the sounds of different decades")
+![Alt text](/Rplot.jpeg?raw=true "My Interest in the sounds of different decades")
 
 ## Defining the User's Taste in Music
 
