@@ -10,7 +10,7 @@ The project contains a couple of modules described below:
 
 ![Alt text](/Rplot.jpeg?raw=true "My Interest in the sounds of different decades")
 
-![Alt text](/Plot1.html?raw=true "Changes in song features over the years")
+![Alt text](/Rplot1.png?raw=true "Changes in song features over the years")
 
 ## Defining the User's Taste in Music
 
