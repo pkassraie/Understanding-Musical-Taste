@@ -1,0 +1,263 @@
+---
+title: "Understanding Taste in Music"
+author: "P. kassraie"
+date: "December 1, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE )
+#, message=F, warning=F, error=F,fig.align = "center")
+```
+
+# 0. Intro
+
+In this project I want to gather all the data regarding the songs I've been listening to in the last 5 years, from the musical cords to the artist's origins and last.fm tags and etc. My goal is to gain some understanding over my taste in music and train a model which can tell if I'm going to like a new song or not.
+Using this model, I plan to automatically generate playlists for myself, then sit back and dive into the music!
+
+I've been using last.fm since december 2012. Last.fm is an amazing website, which keeps track of almost all of the tracks it's users listen to. I have had it installed on my phone and my computer, so a large portion of everything I've listened is logged, a total of 38173 song, 7920 of which are distinct.
+
+# 1. Gathering and Organizing a Large and Clean Dataset
+
+## 1.1 Setting Up Spotify Web API 
+```{r}
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+library(highcharter)
+library(RColorBrewer)
+library(spotifyr)
+Sys.setenv(SPOTIFY_CLIENT_ID = '67cd991e4f1e4571bdb4391f72afee61' )
+Sys.setenv(SPOTIFY_CLIENT_SECRET = '1c7ca3366738498686924f7203cf8b62')
+access_token <- get_spotify_access_token()
+```
+
+## 1.2 Creating Music Listening History Dataset
+
+Last.fm allows us to gather the music listening history data.
+I have previously collected this data using python and [lastfm_downloader.ipynb](https://github.com/gboeing/data-visualization/blob/master/lastfm-listening-history/lastfm_downloader.ipynb)
+Here, I'll just load them  into dataframes.
+
+Also, MusicBrainz API gives a set of features for the origins of (Almost any) artist.
+The features for each artist are also previously collected, using [musicbrainz_downloader.ipynb](https://github.com/gboeing/data-visualization/blob/master/lastfm-listening-history/musicbrainz_downloader.ipynb)
+
+*IMPORTANT*  Many of the song names, artist names etc, contain special characters, take "Sigur Rós" as an example. We should handle the string encodings with caution. I have toggled between "utf-8-sig","utf-8","latin1" for all the transitions to and from csv files, amongst R and Python in order to keep all names correct. (The python codes I have used are all included in the repo.)
+When working within R the wiset choice is to save as RDS.
+
+```{r}
+ListenHistory = read.csv('scrob.csv',encoding = 'UTF-8')
+ArtistInfo = read.csv('MuBr.csv',encoding = 'UTF-8')
+names(ListenHistory)[1] = "artist"
+names(ArtistInfo)[1] = "id"
+ListenHistory %>% group_by(artist, album, track) %>% summarize(hits = n()) ->Logs
+ArtistInfo %>% select(id, artist = name, type, gender, country, begin_date, end_date, area_name, place, place_full)->ArtistInfo
+Logs = left_join(Logs,ArtistInfo,by='artist')
+Logs <- data.frame(lapply(Logs, as.character), stringsAsFactors=FALSE)
+```
+
+The mean value of the time a song is listened to during the day could have been a valuable indicator for others, but not me!
+
+## 1.3 Adding almost everything spotify has to offer
+
+Spotify Web API has a function called get audio features. Now I'm gonna use that to crawl the audio features for all the songs from all the artists I have listenend to in the past 5 years. Exciting!
+Using this large dataset I'm gonna improve my Listening history dataset by adding more features to each track. Also, I'm going to search amongst (and beyond) these songs for furthur track recommendations, based on my taste in music.
+
+
+```{r, eval=FALSE}
+getaudiofeat <- function(artistname) {
+    out <- tryCatch(
+        {
+        get_artist_audio_features(artistname,access_token = access_token)
+        },
+        error=function(cond) {
+          return(data.frame())
+        },
+        warning=function(cond ) {
+          return(data.frame())
+        })    
+    return(out)}
+
+SpotifyArtistFeatures = data.frame()
+ArtistNames = distinct(PrevArtFeat["artist_name"])
+artists = distinct(Logs["artist"])
+artists %>% mutate(artist = tolower(artist)) %>% filter(!(artist %in% ArtistNames$artist))->artists
+
+for (a in artists[229:length(artists$artist),1]){
+  print(a)
+  chunk = getaudiofeat(a)
+  if(nrow(chunk)!=0){
+      chunk["artist_name"] = a
+      SpotifyArtistFeatures = bind_rows(SpotifyArtistFeatures, chunk)
+  }
+}
+saveRDS(SpotifyArtistFeatures,"Spotify_audio_features.rds")
+```
+
+
+Alright, I have to say that this is one of the coolest dataset's I've ever collected! Lets take a look at it's columns:
+
+* acousticness: A confidence measure from 0.0 to 1.0 of whether the track is acoustic. 1.0 represents high confidence the track is acoustic. 
+danceability: Danceability describes how suitable a track is for dancing based on a combination of musical elements including tempo, rhythm stability, beat strength, and overall regularity. A value of 0.0 is least danceable and 1.0 is most danceable. 
+
+* duration_ms: The duration of the track in milliseconds.
+energy: Energy is a measure from 0.0 to 1.0 and represents a perceptual measure of intensity and activity. Typically, energetic tracks feel fast, loud, and noisy. For example, death metal has high energy, while a Bach prelude scores low on the scale. Perceptual features contributing to this attribute include dynamic range, perceived loudness, timbre, onset rate, and general entropy.
+
+* instrumentalness: Predicts whether a track contains no vocals. "Ooh" and "aah" sounds are treated as instrumental in this context. Rap or spoken word tracks are clearly "vocal". The closer the instrumentalness value is to 1.0, the greater likelihood the track contains no vocal content. Values above 0.5 are intended to represent instrumental tracks, but confidence is higher as the value approaches 1.0.
+* key: The key the track is in. Integers map to pitches using standard Pitch Class notation. E.g. 0 = C, 1 = C♯/D♭, 2 = D, and so on.
+
+* liveness: Detects the presence of an audience in the recording. Higher liveness values represent an increased probability that the track was performed live. A value above 0.8 provides strong likelihood that the track is live.
+
+* loudness: The overall loudness of a track in decibels (dB). Loudness values are averaged across the entire track and are useful for comparing relative loudness of tracks. Loudness is the quality of a sound that is the primary psychological correlate of physical strength (amplitude). Values typical range between -60 and 0 db.
+
+* mode: Mode indicates the modality (major or minor) of a track, the type of scale from which its melodic content is derived. Major is represented by 1 and minor is 0.
+
+* speechiness: Speechiness detects the presence of spoken words in a track. The more exclusively speech-like the recording (e.g. talk show, audio book, poetry), the closer to 1.0 the attribute value. Values above 0.66 describe tracks that are probably made entirely of spoken words. Values between 0.33 and 0.66 describe tracks that may contain both music and speech, either in sections or layered, including such cases as rap music. Values below 0.33 most likely represent music and other non-speech-like tracks.
+
+* tempo: The overall estimated tempo of a track in beats per minute (BPM). In musical terminology, tempo is the speed or pace of a given piece and derives directly from the average beat duration.
+
+* time_signature: An estimated overall time signature of a track. The time signature (meter) is a notational convention to specify how many beats are in each bar (or measure).
+
+* valence : A measure from 0.0 to 1.0 describing the musical positiveness conveyed by a track. Tracks with high valence sound more positive (e.g. happy, cheerful, euphoric), while tracks with low valence sound more negative (e.g. sad, depressed, angry).
+
+Now, we add all these features to the listening history data:
+
+```{r}
+SpotifyArtistFeatures = readRDS("Spotify_audio_features.csv")
+SpotifyArtistFeatures %>% mutate(artist_name = tolower(artist_name),
+                                 track_name = tolower(track_name),
+                                 album_name = tolower(album_name)) -> SpotifyArtistFeatures
+Logs %>% mutate(artist = tolower(artist),
+                track = tolower(track),
+                album = tolower(album))->Logs
+SpotifyArtistFeatures %>% filter(track_name %in% Logs$track)->SpotifySongFeatures
+Logs1 = merge(Logs, SpotifySongFeatures, by.x = "track", by.y = "track_name", all.x = FALSE, all.y = FALSE)
+Logs1 %>% filter(artist==artist_name)->Logs1
+```
+
+I might get back and add the song's genre to this dataframe later.
+
+## 1.4 Cleaning up the data
+
+Now, I'll try to remove every invalid row as well as only keeping the columns describing the song itself.
+
+```{r}
+Logs1 %>% filter(artist==artist_name)->Logs1
+Logs1["album_year"] = character()
+for (i in 1:length(Logs1$track)){
+  Logs1[i,"begin_date"]= unlist(strsplit(Logs1[i,"begin_date"],"-"))[1]
+  Logs1[i,"end_date"]= unlist(strsplit(Logs1[i,"end_date"],"-"))[1]
+  Logs1[i,"album_year"]= format(Logs1[i,"album_release_year"], "%Y")
+}
+keep = c("track", "hits", "artist", "album","danceability",
+         "energy","key","loudness","mode","speechiness","acousticness","instrumentalness",
+         "liveness","valence", "tempo","duration_ms","time_signature","key_mode","track_popularity",
+         "type", "gender", "country", "begin_date", "end_date",
+         "area_name","place","place_full","album_year","album_popularity")
+Logs1 = Logs1[,keep]
+Logs1$hits = as.numeric(Logs1$hits)
+Logs1$begin_date = as.numeric(Logs1$begin_date)
+Logs1$end_date = as.numeric(Logs1$end_date)
+Logs1$album_year = as.numeric(Logs1$album_year)
+sapply(Logs1,class)
+```
+
+Alright! Everything is clean and clear now. Let's take a look at my listening habbits.
+
+# 2. Gaining Insight By Visualization
+
+In this part, we will analyze the gathered datasets in order to gain a better understanding over the large space they make.
+
+## 2.1 How Song Audio Features has changed over the Decades
+
+We have the release year of around 251k songs. let's see how song audio features (speechiness, danceability, etc) has changed over the years.
+
+```{r}
+SpotifyArtistFeatures["album_year"] = character()
+for (i in 1:length(SpotifyArtistFeatures$track_name)){
+  SpotifyArtistFeatures[i,"album_year"]= format(SpotifyArtistFeatures[i,"album_release_year"], "%Y")
+}
+SpotifyArtistFeatures %>% group_by(album_year) %>% summarise(danceability = mean(danceability), liveness = mean(liveness),
+                                                             album_popularity=mean(album_popularity) , energy = mean(energy),
+                                                             loudness = mean(loudness), acousticness = mean(acousticness),
+                                                             speechiness = mean(speechiness),
+                                                             instrumentalness = mean(instrumentalness),
+                                                             valence = mean(valence),temp = mean(tempo),
+                                                             duration_ms = mean(duration_ms),
+                                                             track_popularity = mean(track_popularity))-> Temp
+highchart() %>% 
+  hc_xAxis(categories = Temp$album_year) %>% 
+  hc_add_series(name = "Danceability", data = Temp$danceability) %>% 
+  hc_add_series(name = "Speechiness", data = Temp$speechiness) %>% 
+  hc_add_series(name = "Energy", data = Temp$energy) %>% 
+  hc_add_series(name = "Valence", data = Temp$valence) %>% 
+  hc_add_series(name = "", data = Temp$instrumentalness)
+
+highchart() %>% 
+  hc_xAxis(categories = Temp$album_year) %>% 
+  hc_add_series(name = "Album Popularity", data = Temp$album_popularity) %>% 
+  hc_add_series(name = "Track Popularity", data = Temp$track_popularity) %>% 
+  hc_add_series(name = "Tempo", data = Temp$temp) %>% 
+  hc_add_series(name = "Duration", data = Temp$duration_ms/1000)
+```
+
+EXPLAIN.
+
+## 2.2 How My Listening Habbits Have changed over the past few years
+
+
+```{r}
+ListenHistory= left_join(ListenHistory,ArtistInfo,by='artist')
+ListenHistory <- data.frame(lapply(ListenHistory, as.character), stringsAsFactors=FALSE)
+ListenHistory %>% mutate(artist = tolower(artist),
+                track = tolower(track),
+                album = tolower(album))->ListenHistory
+ListenHistory1 = merge(ListenHistory, SpotifySongFeatures, by.x = "track", by.y = "track_name", all.x = FALSE, all.y = FALSE)
+ListenHistory1 %>% filter(artist==artist_name)->ListenHistory1
+ListenHistory1["album_year"] = character()
+for (i in 1:length(ListenHistory1$track)){
+  ListenHistory1[i,"begin_date"]= unlist(strsplit(ListenHistory1[i,"begin_date"],"-"))[1]
+  ListenHistory1[i,"end_date"]= unlist(strsplit(ListenHistory1[i,"end_date"],"-"))[1]
+  ListenHistory1[i,"album_year"]= format(ListenHistory1[i,"album_release_year"], "%Y")
+  ListenHistory1[i,"datetime"] = unlist(strsplit(ListenHistory1[i,"datetime"]," "))[1]
+  ListenHistory1[i,"listen_year"] = unlist(strsplit(ListenHistory1[i,"datetime"],"-"))[1]
+  ListenHistory1[i,"listen_month"] = unlist(strsplit(ListenHistory1[i,"datetime"],"-"))[2]
+}
+keep = c("track", "listen_year","listen_month", "artist", "album","danceability",
+         "energy","key","loudness","mode","speechiness","acousticness","instrumentalness",
+         "liveness","valence", "tempo","duration_ms","time_signature","key_mode","track_popularity",
+         "type", "gender", "country", "begin_date", "end_date",
+         "area_name","place","place_full","album_year","album_popularity")
+ListenHistory1 = ListenHistory1[,keep]
+ListenHistory1$begin_date = as.numeric(ListenHistory1$begin_date)
+ListenHistory1$listen_year = as.numeric(ListenHistory1$listen_year)
+ListenHistory1$listen_month = as.numeric(ListenHistory1$listen_month)
+ListenHistory1$end_date = as.numeric(ListenHistory1$end_date)
+ListenHistory1$album_year = as.numeric(ListenHistory1$album_year)
+ListenHistory1 %>% filter(listen_year>2012)->ListenHistory1
+ListenHistory1 %>% mutate(decade=ifelse(album_year<1950,"Before 50's",
+                                        ifelse(album_year<1960,"50's",
+                                               ifelse(album_year<1970,"60's",
+                                                      ifelse(album_year<1980,"70's",
+                                                             ifelse(album_year<1990,"80's",
+                                                                    ifelse(album_year<2000,"90's",
+                                                                           ifelse(album_year<2010,"2000's",
+                                                                                  "After 2010"))))))))->ListenHistory1
+ggplot()+
+  geom_bar(data = ListenHistory1,aes(x=listen_year,fill=as.factor(decade)),stat="bin")+
+  xlab("Year of Listening to the songs")+
+  ylab("Count")+
+  scale_fill_brewer("Decade")
+
+  
+```
+
+
+## 2.3
+## 2.4
+## 2.5
+
+
+# 3. Understanding A User's Taste in Music
+# 4. Recommending New Tracks To A User
+
+
